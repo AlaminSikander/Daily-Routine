@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, addDays } from "date-fns";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { TaskForm } from "@/components/task-form";
 import { useTimingTick } from "@/hooks/use-timing-tick";
 import { categoryLabel } from "@/lib/categories";
@@ -27,6 +28,9 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deletePrompt, setDeletePrompt] = useState<
+    null | { kind: "one"; id: string; title: string } | { kind: "bulk" }
+  >(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,12 +113,12 @@ export default function TasksPage() {
     if (ok) void load();
   }
 
-  async function removeOne(id: string) {
+  async function executeDeleteOne(id: string): Promise<boolean> {
     const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       toast.error(typeof j.error === "string" ? j.error : "Could not delete task");
-      return;
+      return false;
     }
     toast.success("Task deleted");
     setSelected((s) => {
@@ -123,15 +127,11 @@ export default function TasksPage() {
       return n;
     });
     void load();
+    return true;
   }
 
-  async function removeSelected() {
-    if (selectedCount === 0) return;
-    const ok = window.confirm(
-      `Delete ${selectedCount} task${selectedCount === 1 ? "" : "s"}? This cannot be undone.`
-    );
-    if (!ok) return;
-
+  async function executeDeleteBulk(): Promise<boolean> {
+    if (selectedCount === 0) return false;
     const ids = [...selected];
     let failed = 0;
     await Promise.all(
@@ -143,12 +143,13 @@ export default function TasksPage() {
 
     if (failed > 0) {
       toast.error(`${failed} task(s) could not be deleted.`);
-    } else {
-      toast.success(`Deleted ${ids.length} task${ids.length === 1 ? "" : "s"}.`);
+      return false;
     }
+    toast.success(`Deleted ${ids.length} task${ids.length === 1 ? "" : "s"}.`);
     setSelected(new Set());
     setSelectMode(false);
     void load();
+    return true;
   }
 
   return (
@@ -202,7 +203,7 @@ export default function TasksPage() {
             <button
               type="button"
               disabled={selectedCount === 0}
-              onClick={() => void removeSelected()}
+              onClick={() => setDeletePrompt({ kind: "bulk" })}
               className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
             >
               Delete selected ({selectedCount})
@@ -338,7 +339,9 @@ export default function TasksPage() {
                           )}
                           <button
                             type="button"
-                            onClick={() => void removeOne(t.id)}
+                            onClick={() =>
+                              setDeletePrompt({ kind: "one", id: t.id, title: t.title })
+                            }
                             className="rounded-lg px-2 py-1 text-xs text-red-600"
                           >
                             Delete
@@ -354,6 +357,29 @@ export default function TasksPage() {
         </div>
       )}
       <TaskForm open={open} onClose={() => setOpen(false)} onCreated={() => void load()} />
+
+      <ConfirmModal
+        open={deletePrompt !== null}
+        onClose={() => setDeletePrompt(null)}
+        title={deletePrompt?.kind === "bulk" ? "Delete selected tasks" : "Delete task"}
+        description={
+          deletePrompt?.kind === "bulk"
+            ? `Permanently delete ${selectedCount} selected task${selectedCount === 1 ? "" : "s"}? This cannot be undone.`
+            : deletePrompt?.kind === "one"
+              ? `Permanently delete “${deletePrompt.title}”? This cannot be undone.`
+              : ""
+        }
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (deletePrompt?.kind === "one") {
+            return await executeDeleteOne(deletePrompt.id);
+          }
+          if (deletePrompt?.kind === "bulk") {
+            return await executeDeleteBulk();
+          }
+          return false;
+        }}
+      />
     </div>
   );
 }
