@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Mic, MicOff } from "lucide-react";
 import { format } from "date-fns";
 
@@ -11,10 +12,8 @@ type Props = {
 export function VoiceQuickAdd({ onTasksParsed }: Props) {
   const [listening, setListening] = useState(false);
   const [text, setText] = useState("");
-  const [err, setErr] = useState<string | null>(null);
 
   function startListen() {
-    setErr(null);
     if (typeof window === "undefined") return;
     type RecInstance = {
       lang: string;
@@ -30,7 +29,7 @@ export function VoiceQuickAdd({ onTasksParsed }: Props) {
     };
     const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
     if (!SR) {
-      setErr("Speech recognition not supported in this browser.");
+      toast.error("Speech recognition is not supported in this browser.");
       return;
     }
     const rec = new SR();
@@ -43,14 +42,13 @@ export function VoiceQuickAdd({ onTasksParsed }: Props) {
         .trim();
       setText(t);
     };
-    rec.onerror = () => setErr("Could not capture audio.");
+    rec.onerror = () => toast.error("Could not capture audio.");
     rec.onend = () => setListening(false);
     rec.start();
     setListening(true);
   }
 
   async function parseAndCreate() {
-    setErr(null);
     try {
       const res = await fetch("/api/ai/voice", {
         method: "POST",
@@ -66,7 +64,7 @@ export function VoiceQuickAdd({ onTasksParsed }: Props) {
       onTasksParsed(tasks);
       setText("");
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed");
+      toast.error(e instanceof Error ? e.message : "Failed to parse voice");
     }
   }
 
@@ -90,7 +88,6 @@ export function VoiceQuickAdd({ onTasksParsed }: Props) {
         rows={2}
         className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-950"
       />
-      {err && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{err}</p>}
       <button
         type="button"
         onClick={() => void parseAndCreate()}

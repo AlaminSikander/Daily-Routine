@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { TASK_CATEGORIES } from "@/lib/categories";
 import type { TaskReminder } from "@/types/database";
 
@@ -32,7 +33,6 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
   const [repeatType, setRepeatType] = useState<string>("none");
   const [weekdays, setWeekdays] = useState<number[]>([1, 3, 5]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [r10, setR10] = useState(true);
   const [r30, setR30] = useState(false);
@@ -55,7 +55,6 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
     setLoading(true);
     try {
       if (repeatType === "custom" && weekdays.length === 0) {
@@ -95,10 +94,14 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
       }
       setTitle("");
       setNotes("");
+      toast.success(
+        repeatType === "none" ? "Task saved" : "Recurring tasks saved"
+      );
       onCreated();
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error");
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -118,11 +121,6 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
           </button>
         </div>
         <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-3">
-          {error && (
-            <p className="rounded-lg bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
-              {error}
-            </p>
-          )}
           <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
             Title
             <input

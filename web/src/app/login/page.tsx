@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
 const authConfigured =
@@ -13,7 +14,6 @@ const authConfigured =
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   if (!authConfigured) {
     return (
@@ -33,7 +33,6 @@ export default function LoginPage() {
 
   async function magicLink(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
     try {
       const supabase = createClient();
       const origin = window.location.origin;
@@ -43,13 +42,13 @@ export default function LoginPage() {
       });
       if (error) throw error;
       setSent(true);
+      toast.success("Check your email for the login link.");
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Sign-in failed");
+      toast.error(e instanceof Error ? e.message : "Sign-in failed");
     }
   }
 
   async function google() {
-    setErr(null);
     try {
       const supabase = createClient();
       const origin = window.location.origin;
@@ -59,7 +58,7 @@ export default function LoginPage() {
       });
       if (error) throw error;
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Google sign-in failed");
+      toast.error(e instanceof Error ? e.message : "Google sign-in failed");
     }
   }
 
@@ -69,11 +68,6 @@ export default function LoginPage() {
       <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
         Cloud backup and sync use Supabase Auth (email magic link or Google).
       </p>
-      {err && (
-        <p className="mt-4 rounded-lg bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
-          {err}
-        </p>
-      )}
       {sent ? (
         <p className="mt-6 text-zinc-700 dark:text-zinc-300">Check your email for the login link.</p>
       ) : (

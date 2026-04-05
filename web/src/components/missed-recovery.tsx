@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { addDays, format } from "date-fns";
 import type { TaskRow } from "@/types/database";
 
@@ -21,7 +22,10 @@ export function MissedRecoveryCard({ task, onDone }: Props) {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await res.text());
+      toast.success("Task updated");
       onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update task");
     } finally {
       setBusy(null);
     }

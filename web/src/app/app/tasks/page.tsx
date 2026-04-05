@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { format, addDays } from "date-fns";
 import { Plus } from "lucide-react";
+import { toast } from "sonner";
 import { TaskForm } from "@/components/task-form";
 import { categoryLabel } from "@/lib/categories";
 import type { TaskRow } from "@/types/database";
@@ -27,16 +28,27 @@ export default function TasksPage() {
   }, [load]);
 
   async function setStatus(id: string, status: TaskRow["status"]) {
-    await fetch(`/api/tasks/${id}`, {
+    const res = await fetch(`/api/tasks/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(typeof j.error === "string" ? j.error : "Could not update task");
+      return;
+    }
     void load();
   }
 
   async function remove(id: string) {
-    await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(typeof j.error === "string" ? j.error : "Could not delete task");
+      return;
+    }
+    toast.success("Task deleted");
     void load();
   }
 

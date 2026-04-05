@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { Plus } from "lucide-react";
+import { toast } from "sonner";
 import { TaskForm } from "@/components/task-form";
 import { VoiceQuickAdd } from "@/components/voice-quick-add";
 import { MissedRecoveryCard } from "@/components/missed-recovery";
@@ -39,7 +40,7 @@ export default function DashboardPage() {
         .lte("log_date", today);
       setHabitWeek(logs?.length ?? 0);
     } catch {
-      /* ignore */
+      toast.error("Could not load dashboard data.");
     } finally {
       setLoading(false);
     }
@@ -80,28 +81,41 @@ export default function DashboardPage() {
 
   async function toggleTask(t: TaskRow) {
     const next = t.status === "completed" ? "pending" : "completed";
-    await fetch(`/api/tasks/${t.id}`, {
+    const res = await fetch(`/api/tasks/${t.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = typeof j.error === "string" ? j.error : "Could not update task";
+      toast.error(msg);
+      return;
+    }
     void load();
   }
 
   async function snooze(t: TaskRow, minutes: number) {
     const until = new Date(Date.now() + minutes * 60000).toISOString();
-    await fetch(`/api/tasks/${t.id}`, {
+    const res = await fetch(`/api/tasks/${t.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ snooze_until: until }),
     });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(typeof j.error === "string" ? j.error : "Could not snooze");
+      return;
+    }
+    toast.success(`Snoozed ${minutes} minutes`);
     void load();
   }
 
   async function queueVoiceTasks(parsed: unknown[]) {
+    let added = 0;
     for (const raw of parsed) {
       const t = raw as Record<string, string>;
-      await fetch("/api/tasks", {
+      const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -115,7 +129,15 @@ export default function DashboardPage() {
           reminders: [],
         }),
       });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof j.error === "string" ? j.error : "Could not add task";
+        toast.error(msg);
+      } else {
+        added += 1;
+      }
     }
+    if (added > 0) toast.success(`Added ${added} task(s)`);
     void load();
   }
 

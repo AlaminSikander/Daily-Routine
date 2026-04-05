@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { addDays, format } from "date-fns";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { findBlockingTimeConflict } from "@/lib/task-time-conflict";
 import { generateOccurrenceDates } from "@/lib/recurrence";
 import type { RepeatConfig, TaskReminder } from "@/types/database";
 
@@ -74,11 +75,49 @@ export async function POST(request: Request) {
   const startsOn = b.starts_on ?? b.scheduled_date;
   const until = b.ends_on ? new Date(b.ends_on) : addDays(new Date(), 90);
 
+  const userId = user.id;
+
+  async function loadPendingSlotsForDates(dates: string[]) {
+    const unique = [...new Set(dates)];
+    if (unique.length === 0) return [];
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("id, scheduled_date, start_time, end_time, status, title")
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .in("scheduled_date", unique);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
+
   if (repeatType === "none") {
+    let existing: Awaited<ReturnType<typeof loadPendingSlotsForDates>> = [];
+    try {
+      existing = await loadPendingSlotsForDates([b.scheduled_date]);
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 500 });
+    }
+    const clash = findBlockingTimeConflict(
+      b.scheduled_date,
+      b.start_time ?? null,
+      b.end_time ?? null,
+      existing
+    );
+    if (clash) {
+      return NextResponse.json(
+        {
+          error: `That time overlaps “${clash.title}” on ${clash.scheduled_date} (${clash.start_time?.slice(0, 5) ?? "—"}).`,
+          code: "TIME_CONFLICT",
+          conflict: clash,
+        },
+        { status: 409 }
+      );
+    }
+
     const { data, error } = await supabase
       .from("tasks")
       .insert({
-        user_id: user.id,
+        user_id: userId,
         title: b.title,
         category: b.category,
         scheduled_date: b.scheduled_date,
@@ -101,7 +140,7 @@ export async function POST(request: Request) {
   const { data: series, error: seriesError } = await supabase
     .from("task_series")
     .insert({
-      user_id: user.id,
+      user_id: userId,
       title: b.title,
       category: b.category,
       start_time: b.start_time ?? null,
@@ -122,8 +161,37 @@ export async function POST(request: Request) {
   }
 
   const dates = generateOccurrenceDates(repeatType, repeatConfig, startsOn, until, 120);
+
+  let existingForSeries: Awaited<ReturnType<typeof loadPendingSlotsForDates>> = [];
+  try {
+    existingForSeries = await loadPendingSlotsForDates(dates);
+  } catch (e) {
+    await supabase.from("task_series").delete().eq("id", series.id);
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
+
+  for (const d of dates) {
+    const clash = findBlockingTimeConflict(
+      d,
+      b.start_time ?? null,
+      b.end_time ?? null,
+      existingForSeries
+    );
+    if (clash) {
+      await supabase.from("task_series").delete().eq("id", series.id);
+      return NextResponse.json(
+        {
+          error: `That time overlaps “${clash.title}” on ${clash.scheduled_date} (${clash.start_time?.slice(0, 5) ?? "—"}).`,
+          code: "TIME_CONFLICT",
+          conflict: clash,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const rows = dates.map((d) => ({
-    user_id: user.id,
+    user_id: userId,
     series_id: series.id,
     title: b.title,
     category: b.category,
