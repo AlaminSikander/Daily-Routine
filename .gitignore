@@ -1,0 +1,10 @@
+# Python (ai-service)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Editor / OS
+.DS_Store
+*.swp
