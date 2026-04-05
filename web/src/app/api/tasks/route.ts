@@ -2,8 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { addDays, format } from "date-fns";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { findBlockingTimeConflict } from "@/lib/task-time-conflict";
 import { generateOccurrenceDates } from "@/lib/recurrence";
+import { findSameTaskTooClose } from "@/lib/task-same-title-gap";
 import type { RepeatConfig, TaskReminder } from "@/types/database";
 
 const taskCategory = z.enum([
@@ -72,46 +72,51 @@ export async function POST(request: Request) {
   const repeatType = b.repeat_type;
   const repeatConfig = (b.repeat_config ?? {}) as RepeatConfig;
   const reminders = (b.reminders ?? []) as TaskReminder[];
+
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  if (b.scheduled_date < todayStr) {
+    return NextResponse.json(
+      { error: "Choose today or a future date.", code: "PAST_DATE" },
+      { status: 400 }
+    );
+  }
+
   const startsOn = b.starts_on ?? b.scheduled_date;
+  if (startsOn < todayStr) {
+    return NextResponse.json(
+      { error: "Start date cannot be in the past.", code: "PAST_DATE" },
+      { status: 400 }
+    );
+  }
+
   const until = b.ends_on ? new Date(b.ends_on) : addDays(new Date(), 90);
 
   const userId = user.id;
 
-  async function loadPendingSlotsForDates(dates: string[]) {
-    const unique = [...new Set(dates)];
-    if (unique.length === 0) return [];
-    const { data, error } = await supabase
-      .from("tasks")
-      .select("id, scheduled_date, start_time, end_time, status, title")
-      .eq("user_id", userId)
-      .eq("status", "pending")
-      .in("scheduled_date", unique);
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }
-
   if (repeatType === "none") {
-    let existing: Awaited<ReturnType<typeof loadPendingSlotsForDates>> = [];
-    try {
-      existing = await loadPendingSlotsForDates([b.scheduled_date]);
-    } catch (e) {
-      return NextResponse.json({ error: String(e) }, { status: 500 });
-    }
-    const clash = findBlockingTimeConflict(
-      b.scheduled_date,
-      b.start_time ?? null,
-      b.end_time ?? null,
-      existing
-    );
-    if (clash) {
-      return NextResponse.json(
-        {
-          error: `That time overlaps “${clash.title}” on ${clash.scheduled_date} (${clash.start_time?.slice(0, 5) ?? "—"}).`,
-          code: "TIME_CONFLICT",
-          conflict: clash,
-        },
-        { status: 409 }
+    if (b.start_time) {
+      const { data: existing } = await supabase
+        .from("tasks")
+        .select("id, title, scheduled_date, start_time, status")
+        .eq("user_id", userId)
+        .eq("scheduled_date", b.scheduled_date)
+        .eq("status", "pending");
+
+      const clash = findSameTaskTooClose(
+        existing ?? [],
+        b.title,
+        b.scheduled_date,
+        b.start_time
       );
+      if (clash) {
+        return NextResponse.json(
+          {
+            error: `Same task title on this day is already scheduled within 15 minutes (existing ${clash.start_time?.slice(0, 5) ?? "—"}).`,
+            code: "SAME_TASK_TOO_CLOSE",
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const { data, error } = await supabase
@@ -162,31 +167,28 @@ export async function POST(request: Request) {
 
   const dates = generateOccurrenceDates(repeatType, repeatConfig, startsOn, until, 120);
 
-  let existingForSeries: Awaited<ReturnType<typeof loadPendingSlotsForDates>> = [];
-  try {
-    existingForSeries = await loadPendingSlotsForDates(dates);
-  } catch (e) {
-    await supabase.from("task_series").delete().eq("id", series.id);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
-  }
+  if (b.start_time) {
+    const uniqueDates = [...new Set(dates)];
+    const { data: existingSeries } = await supabase
+      .from("tasks")
+      .select("id, title, scheduled_date, start_time, status")
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .in("scheduled_date", uniqueDates);
 
-  for (const d of dates) {
-    const clash = findBlockingTimeConflict(
-      d,
-      b.start_time ?? null,
-      b.end_time ?? null,
-      existingForSeries
-    );
-    if (clash) {
-      await supabase.from("task_series").delete().eq("id", series.id);
-      return NextResponse.json(
-        {
-          error: `That time overlaps “${clash.title}” on ${clash.scheduled_date} (${clash.start_time?.slice(0, 5) ?? "—"}).`,
-          code: "TIME_CONFLICT",
-          conflict: clash,
-        },
-        { status: 409 }
-      );
+    const list = existingSeries ?? [];
+    for (const d of dates) {
+      const clash = findSameTaskTooClose(list, b.title, d, b.start_time);
+      if (clash) {
+        await supabase.from("task_series").delete().eq("id", series.id);
+        return NextResponse.json(
+          {
+            error: `Same task title on ${d} is already scheduled within 15 minutes (existing ${clash.start_time?.slice(0, 5) ?? "—"}).`,
+            code: "SAME_TASK_TOO_CLOSE",
+          },
+          { status: 409 }
+        );
+      }
     }
   }
 

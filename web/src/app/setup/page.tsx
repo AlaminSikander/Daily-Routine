@@ -14,9 +14,13 @@ export default function SetupPage() {
       </p>
       <ol className="mt-6 list-decimal space-y-3 pl-5 text-zinc-700 dark:text-zinc-300">
         <li>
-          In the Supabase SQL editor, run the migration file{" "}
+          In the Supabase SQL editor, run the migration files{" "}
           <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-800">
             supabase/migrations/001_initial_schema.sql
+          </code>{" "}
+          then{" "}
+          <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-800">
+            002_task_started_at.sql
           </code>
           .
         </li>

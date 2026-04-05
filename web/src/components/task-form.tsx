@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { format } from "date-fns";
 import { toast } from "sonner";
 import { TASK_CATEGORIES } from "@/lib/categories";
 import type { TaskReminder } from "@/types/database";
@@ -39,6 +40,15 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
   const [r60, setR60] = useState(false);
   const [persistent, setPersistent] = useState(false);
 
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+
+  useEffect(() => {
+    if (!open) return;
+    const today = format(new Date(), "yyyy-MM-dd");
+    const base = defaultDate ?? today;
+    setScheduledDate(base < today ? today : base);
+  }, [open, defaultDate]);
+
   if (!open) return null;
 
   function toggleWeekday(d: number) {
@@ -57,6 +67,9 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
     e.preventDefault();
     setLoading(true);
     try {
+      if (scheduledDate < todayStr) {
+        throw new Error("Choose today or a future date.");
+      }
       if (repeatType === "custom" && weekdays.length === 0) {
         throw new Error("Pick at least one weekday for custom repeat.");
       }
@@ -150,6 +163,7 @@ export function TaskForm({ open, onClose, defaultDate, onCreated }: Props) {
               <input
                 type="date"
                 required
+                min={todayStr}
                 value={scheduledDate}
                 onChange={(e) => setScheduledDate(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-600 dark:bg-zinc-950"

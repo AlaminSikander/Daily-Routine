@@ -10,7 +10,7 @@ export function AppToaster() {
       theme={resolved}
       richColors
       closeButton
-      position="top-center"
+      position="top-right"
       toastOptions={{
         classNames: {
           toast:

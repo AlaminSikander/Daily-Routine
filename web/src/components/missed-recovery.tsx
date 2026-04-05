@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { addDays, format } from "date-fns";
+import { taskPatchHeaders } from "@/lib/task-timing-rules";
 import type { TaskRow } from "@/types/database";
 
 type Props = {
@@ -18,7 +19,7 @@ export function MissedRecoveryCard({ task, onDone }: Props) {
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...taskPatchHeaders() },
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await res.text());

@@ -40,6 +40,8 @@ export type TaskRow = {
   priority: PriorityLevel;
   notes: string | null;
   status: TaskStatus;
+  /** Set when user taps Start (requires DB migration `002_task_started_at`). */
+  started_at?: string | null;
   completed_at: string | null;
   reminders: TaskReminder[] | null;
   snooze_until: string | null;

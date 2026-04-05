@@ -10,10 +10,20 @@ import { VoiceQuickAdd } from "@/components/voice-quick-add";
 import { MissedRecoveryCard } from "@/components/missed-recovery";
 import { categoryLabel } from "@/lib/categories";
 import { createClient } from "@/lib/supabase/client";
+import { useTimingTick } from "@/hooks/use-timing-tick";
+import {
+  canCompleteTaskNow,
+  canStartTaskNow,
+  completeTooSoonMessage,
+  startTooEarlyMessage,
+  taskPatchHeaders,
+} from "@/lib/task-timing-rules";
 import type { TaskRow } from "@/types/database";
 
 export default function DashboardPage() {
   const today = format(new Date(), "yyyy-MM-dd");
+  const nowMs = useTimingTick(2000);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [habitWeek, setHabitWeek] = useState(0);
@@ -79,17 +89,47 @@ export default function DashboardPage() {
 
   const missedPrompts = tasks.filter((t) => t.status === "missed" && !t.missed_recovery_prompted);
 
-  async function toggleTask(t: TaskRow) {
-    const next = t.status === "completed" ? "pending" : "completed";
+  async function startTask(t: TaskRow) {
     const res = await fetch(`/api/tasks/${t.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: next }),
+      headers: { ...taskPatchHeaders() },
+      body: JSON.stringify({ started_at: new Date().toISOString() }),
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const msg = typeof j.error === "string" ? j.error : "Could not update task";
-      toast.error(msg);
+      toast.error(typeof j.error === "string" ? j.error : "Could not start task");
+      return;
+    }
+    void load();
+  }
+
+  async function toggleTask(t: TaskRow) {
+    if (t.status === "completed") {
+      const res = await fetch(`/api/tasks/${t.id}`, {
+        method: "PATCH",
+        headers: { ...taskPatchHeaders() },
+        body: JSON.stringify({ status: "pending" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(typeof j.error === "string" ? j.error : "Could not reopen task");
+        return;
+      }
+      void load();
+      return;
+    }
+    if (!t.started_at) {
+      toast.error("Start the task first, then mark it complete.");
+      return;
+    }
+    const res = await fetch(`/api/tasks/${t.id}`, {
+      method: "PATCH",
+      headers: { ...taskPatchHeaders() },
+      body: JSON.stringify({ status: "completed" }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(typeof j.error === "string" ? j.error : "Could not complete task");
       return;
     }
     void load();
@@ -99,7 +139,7 @@ export default function DashboardPage() {
     const until = new Date(Date.now() + minutes * 60000).toISOString();
     const res = await fetch(`/api/tasks/${t.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...taskPatchHeaders() },
       body: JSON.stringify({ snooze_until: until }),
     });
     const j = await res.json().catch(() => ({}));
@@ -190,13 +230,34 @@ export default function DashboardPage() {
                 {nextTask.start_time ?? "—"} · {categoryLabel(nextTask.category)}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void toggleTask(nextTask)}
-                  className="rounded-lg bg-emerald-600 px-2 py-1 text-xs text-white"
-                >
-                  Done
-                </button>
+                {!nextTask.started_at ? (
+                  <button
+                    type="button"
+                    disabled={!canStartTaskNow(nextTask, timeZone, nowMs)}
+                    title={
+                      startTooEarlyMessage(
+                        nextTask.scheduled_date,
+                        nextTask.start_time,
+                        timeZone,
+                        nowMs
+                      ) ?? undefined
+                    }
+                    onClick={() => void startTask(nextTask)}
+                    className="rounded-lg bg-indigo-600 px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Start
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!canCompleteTaskNow(nextTask, nowMs)}
+                    title={completeTooSoonMessage(nextTask.started_at, nowMs) ?? undefined}
+                    onClick={() => void toggleTask(nextTask)}
+                    className="rounded-lg bg-emerald-600 px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Complete
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void snooze(nextTask, 5)}
@@ -240,16 +301,46 @@ export default function DashboardPage() {
                   key={t.id}
                   className="flex items-center justify-between gap-2 rounded-lg border border-zinc-100 px-3 py-2 dark:border-zinc-800"
                 >
-                  <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={t.status === "completed"}
-                      onChange={() => void toggleTask(t)}
-                    />
-                    <span className={t.status === "completed" ? "text-zinc-400 line-through" : ""}>
-                      {t.title}
-                    </span>
-                  </label>
+                  <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                    {t.status === "pending" && !t.started_at ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={!canStartTaskNow(t, timeZone, nowMs)}
+                          title={
+                            startTooEarlyMessage(t.scheduled_date, t.start_time, timeZone, nowMs) ??
+                            undefined
+                          }
+                          onClick={() => void startTask(t)}
+                          className="shrink-0 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Start
+                        </button>
+                        <span>{t.title}</span>
+                      </>
+                    ) : (
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={t.status === "completed"}
+                          disabled={
+                            t.status === "pending" &&
+                            Boolean(t.started_at) &&
+                            !canCompleteTaskNow(t, nowMs)
+                          }
+                          title={
+                            t.status === "pending" && t.started_at
+                              ? completeTooSoonMessage(t.started_at, nowMs) ?? undefined
+                              : undefined
+                          }
+                          onChange={() => void toggleTask(t)}
+                        />
+                        <span className={t.status === "completed" ? "text-zinc-400 line-through" : ""}>
+                          {t.title}
+                        </span>
+                      </label>
+                    )}
+                  </div>
                   <span className="shrink-0 text-xs text-zinc-500">
                     {t.start_time ?? "—"} · {categoryLabel(t.category)}
                   </span>
